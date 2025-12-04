@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="bn">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>বাংলা সেবা — সেবা কর্মী আবেদন রিপোর্ট</title>
+  <style>
+    :root{--bg:#f7f9fc;--card:#fff;--muted:#666}
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,"Noto Sans Bengali",Arial; background:var(--bg); margin:0; padding:10px; color:#111}
+    .container{max-width:900px;margin:0 auto}
+    header{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between}
+    h1{font-size:20px;margin:0}
+    .controls{display:flex;flex-wrap:wrap;gap:8px}
+    button.badge{background:linear-gradient(180deg,#ffffff,#f0f0f0);border:1px solid #ddd;padding:10px 14px;border-radius:8px;cursor:pointer;min-width:140px}
+    button.badge strong{display:block;font-size:18px}
+    .search-row{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}
+    .search-row input, .search-row select{padding:8px;border-radius:8px;border:1px solid #ccc;min-width:160px}
+    table{width:100%;border-collapse:collapse;background:var(--card);box-shadow:0 4px 18px rgba(10,10,10,0.04);border-radius:8px;overflow:hidden}
+    thead th{background:#fafafa;padding:10px;text-align:left;border-bottom:1px solid #eee;font-weight:500}
+    tbody td{padding:10px;border-bottom:1px solid #f1f1f1}
+    tbody tr:hover{background:#fbfdff}
+    .muted{color:var(--muted);font-size:13px}
+    .small{font-size:13px}
+    .summary-area{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+    .pill{background:#fff;border:1px solid #e6e6e6;padding:8px 12px;border-radius:999px}
+    .desc-hidden{max-height:0;overflow:hidden;transition:all .18s ease}
+    .desc-show{max-height:400px}
+    @media (max-width:800px){.search-row input{min-width:120px}thead{display:none}tbody td{display:block;padding:8px}tbody td:before{content:attr(data-label);font-weight:600;display:inline-block;width:120px}}  
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>সেবা কর্মী — আবেদনকারীর রিপোর্ট</h1>
+      <div class="controls">
+        <button id="btnTotal" class="badge">Total apply<br><strong id="totalCount">—</strong></button>
+        <button id="btnByCode" class="badge">Code<br><strong id="codeSummary">—</strong></button>
+        <button id="btnToday" class="badge">Today apply<br><strong id="todayCount">—</strong></button>
+      </div>
+    </header>
+
+    <div class="search-row" style="margin-top:12px">
+      <input id="qDate" type="date" placeholder="তারিখ (YYYY-MM-DD)" />
+      <input id="qName" type="search" placeholder="নাম দিয়ে সার্চ" />
+      <input id="qPhone" type="search" placeholder="ফোন নম্বর" />
+      <input id="qCode" type="search" placeholder="কোড (ID)" />
+      <input id="qGlobal" type="search" placeholder="জেনারেল সার্চ (নাম/ফোন/শহর...)" style="min-width:220px" />
+      <button id="btnClear" class="pill">Clear</button>
+    </div>
+
+    <div class="summary-area" id="summaryArea"></div>
+
+    <div style="overflow:auto">
+      <table id="dataTable">
+        <thead>
+          <tr>
+            <th>Timestamp</th>
+            <th>Name</th>
+            <th>Address</th>
+            <th>Phone</th>
+            <th>Code</th>
+            <th>WhatsApp</th>
+            <th>Description</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    
+
+  </div>
+
+  <script>
+    // ================ CONFIG ================
+    // এখানে আপনার Google Sheet ID এবং শিট নাম বসান
+    const SHEET_ID = '1FUCNLl0RC4li5-3wrw2zP3ZR-2FPE8QiuFu9cRobl0o';
+    const SHEET_NAME = 'Sheet2';
+    // =========================================
+
+    const apiUrl = `https://opensheet.elk.sh/${SHEET_ID}/${encodeURIComponent(SHEET_NAME)}`;
+
+    function toNumber(v){ if(v===undefined||v===null) return 0; v=String(v).replace(/[^0-9.\-]/g,''); const n=parseFloat(v); return isNaN(n)?0:n; }
+
+    let rawData = [];
+    const tbody = document.querySelector('#dataTable tbody');
+
+    async function fetchData(){
+      try{
+        showLoading();
+        const res = await fetch(apiUrl);
+        if(!res.ok) throw new Error('OpenSheet response not OK');
+        const data = await res.json();
+        rawData = data.map(row=>({
+          timestamp: row.timestamp || row.Timestamp || '',
+          name: row.name || row.Name || '',
+          address: row.address || row.Address || '',
+          phone: row.phone || row.Phone || '',
+          code: row.code || row.Code || '',
+          whatsapp: row.whatsapp || row.WhatsApp || row.whatsapp || '',
+          description: row.description || row.Description || ''
+        }));
+        renderAll();
+      }catch(err){
+        console.error(err);
+        tbody.innerHTML = `<tr><td colspan="7">ডেটা লোড করা যায়নি — নিশ্চিত করুন OpenSheet URL এবং Sheet ID সঠিক আছে।<br><small class="muted">${err.message}</small></td></tr>`
+      }
+    }
+
+    function showLoading(){ tbody.innerHTML = '<tr><td colspan="7">লোড হচ্ছে…</td></tr>'; }
+
+    function getFilters(){
+      return {
+        date: document.getElementById('qDate').value,
+        name: document.getElementById('qName').value.trim().toLowerCase(),
+        phone: document.getElementById('qPhone').value.trim().toLowerCase(),
+        code: document.getElementById('qCode').value.trim().toLowerCase(),
+        global: document.getElementById('qGlobal').value.trim().toLowerCase()
+      }
+    }
+
+    function matchesFilter(row,f){
+      if(f.date){ const d = row.timestamp ? (new Date(row.timestamp)).toISOString().slice(0,10) : ''; if(d!==f.date) return false; }
+      if(f.name && !row.name.toLowerCase().includes(f.name)) return false;
+      if(f.phone && !row.phone.toLowerCase().includes(f.phone)) return false;
+      if(f.code && !row.code.toLowerCase().includes(f.code)) return false;
+      if(f.global){ const hay = `${row.name} ${row.phone} ${row.address} ${row.code}`.toLowerCase(); if(!hay.includes(f.global)) return false; }
+      return true;
+    }
+
+    function renderTable(filtered){
+      if(!filtered.length){ tbody.innerHTML = '<tr><td colspan="7">no result found।</td></tr>'; return; }
+      const rows = filtered.map((r,idx)=>{
+        const ts = r.timestamp||'';
+        const ph = r.phone||'';
+        const phoneLink = ph ? `<a href="tel:${ph.replace(/[^0-9+]/g,'')}">${escapeHtml(ph)}</a>` : '';
+        const wa = r.whatsapp ? `<a href="https://wa.me/${r.whatsapp.replace(/[^0-9]/g,'')}" target="_blank">WhatsApp</a>` : '';
+        const descId = 'desc-'+idx;
+        const shortDesc = escapeHtml(String(r.description||'')).slice(0,60);
+        const hasDesc = String(r.description||'').trim().length>0;
+        return `
+        <tr>
+          <td data-label="Timestamp">${escapeHtml(ts)}</td>
+          <td data-label="Name">${escapeHtml(r.name)}</td>
+          <td data-label="Address">${escapeHtml(r.address)}</td>
+          <td data-label="Phone">${phoneLink}</td>
+          <td data-label="Code">${escapeHtml(r.code)}</td>
+          <td data-label="WhatsApp">${wa}</td>
+          <td data-label="Description">
+            ${hasDesc ? `<div><div id="${descId}" class="desc-hidden">${escapeHtml(r.description)}</div><button data-target="${descId}" class="toggleDesc pill">Show</button></div>` : '<span class="muted small">—</span>'}
+          </td>
+        </tr>`
+      }).join('');
+      tbody.innerHTML = rows;
+      // attach toggle listeners
+      document.querySelectorAll('.toggleDesc').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          const id = btn.getAttribute('data-target');
+          const el = document.getElementById(id);
+          if(el.classList.contains('desc-show')){ el.classList.remove('desc-show'); el.classList.add('desc-hidden'); btn.textContent='Show'; }
+          else{ el.classList.remove('desc-hidden'); el.classList.add('desc-show'); btn.textContent='Hide'; }
+        })
+      });
+    }
+
+    function escapeHtml(s){ return String(s||'').replace(/[&<>\"]/g, function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c]}); }
+
+    function computeSummaries(filtered){
+      const total = rawData.length;
+      const todayISO = (new Date()).toISOString().slice(0,10);
+      const todayCount = rawData.filter(r=>{ const d = r.timestamp ? (new Date(r.timestamp)).toISOString().slice(0,10) : ''; return d===todayISO }).length;
+
+      const codeMap = {};
+      rawData.forEach(r=>{ const k = (r.code||'অনাম'); codeMap[k] = (codeMap[k]||0)+1; });
+
+      document.getElementById('totalCount').textContent = total;
+      document.getElementById('todayCount').textContent = todayCount;
+      document.getElementById('codeSummary').textContent = Object.keys(codeMap).length + ' কোড';
+
+      const summaryArea = document.getElementById('summaryArea');
+      const top = Object.entries(codeMap).sort((a,b)=>b[1]-a[1]).slice(0,6);
+      summaryArea.innerHTML = top.map(x=>`<div class="pill">${escapeHtml(x[0])}: ${x[1]}</div>`).join('');
+
+      return {total,todayCount,codeMap};
+    }
+
+    function renderAll(){
+      const f = getFilters();
+      const filtered = rawData.filter(r=>matchesFilter(r,f));
+      renderTable(filtered);
+      computeSummaries(filtered);
+    }
+
+    // events
+    document.querySelectorAll('#qDate,#qName,#qPhone,#qCode,#qGlobal').forEach(el=>el.addEventListener('input', ()=>renderAll()));
+    document.getElementById('btnClear').addEventListener('click', ()=>{ ['qDate','qName','qPhone','qCode','qGlobal'].forEach(id=>document.getElementById(id).value=''); renderAll(); });
+
+    document.getElementById('btnByCode').addEventListener('click', ()=>{
+      const {codeMap} = computeSummaries();
+      const items = Object.entries(codeMap).sort((a,b)=>b[1]-a[1]).map(x=>`${x[0]} — ${x[1]}`).join('\n');
+      alert('Code in :\n\n' + items);
+    });
+
+    document.getElementById('btnTotal').addEventListener('click', ()=>{ const {total} = computeSummaries(); alert('Total apply: ' + total); });
+    document.getElementById('btnToday').addEventListener('click', ()=>{ const {todayCount} = computeSummaries(); alert('Today apply: ' + todayCount); });
+
+    // initial fetch
+    if(SHEET_ID === 'YOUR_SHEET_ID_HERE'){
+      tbody.innerHTML = `<tr><td colspan="7">অপেক্ষা করুন — CONFIG-এ আপনার SHEET_ID বসান এবং পেইজ রিফ্রেশ করুন।</td></tr>`
+    } else { fetchData(); }
+  </script>
+</body>
+</html>
