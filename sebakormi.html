@@ -92,7 +92,7 @@
         if(!res.ok) throw new Error('OpenSheet response not OK');
         const data = await res.json();
         rawData = data.map(row=>({
-          timestamp: row.timestamp || row.Timestamp || '',
+          timestamp: row.timestamp || row.TimeStamp || '',
           name: row.name || row.Name || '',
           address: row.address || row.Address || '',
           phone: row.phone || row.Phone || '',
