@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>রক্তদান ড্যাশবোর্ড</title>
+  <style>
+    :root{
+      --primary:#b30000;
+      --accent:#ff4d4d;
+      --muted:#777;
+      --card-bg:#fff;
+      --bg:#f5f5f7;
+    }
+    body{font-family:Arial,Helvetica,sans-serif;margin:0;background:var(--bg);color:#222}
+    .container{max-width:1000px;margin:18px auto;padding:16px}
+    header{display:flex;align-items:center;justify-content:space-between;background:linear-gradient(90deg,var(--primary),var(--accent));color:#fff;padding:18px;border-radius:8px}
+    header h1{margin:0;font-size:20px}
+    .top-buttons{display:flex;gap:10px;align-items:center}
+    .stat-btn{
+      background:rgba(255,255,255,0.12);
+      border:1px solid rgba(255,255,255,0.18);
+      color:#fff;padding:10px 14px;border-radius:6px;cursor:pointer;font-weight:600;
+    }
+    .stat-btn small{display:block;font-size:12px;opacity:0.9}
+    .controls{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0;align-items:center}
+    .search-box{flex:1;min-width:200px;padding:10px;border-radius:6px;border:1px solid #ddd}
+    select.filter{padding:10px;border-radius:6px;border:1px solid #ddd}
+    .card{background:var(--card-bg);border-radius:8px;padding:12px;box-shadow:0 2px 6px rgba(0,0,0,0.06)}
+    table{width:100%;border-collapse:collapse;font-size:14px}
+    th,td{padding:10px;border-bottom:1px solid #eee;text-align:left;vertical-align:middle}
+    th{background:#fafafa;position:sticky;top:0;z-index:2}
+    .phone-link{color:var(--primary);text-decoration:none;font-weight:600}
+    .img-btn{padding:6px 8px;background:var(--primary);color:#fff;border-radius:6px;border:none;cursor:pointer}
+    .hidden-img{display:none;margin-top:8px;max-width:120px;border-radius:6px}
+    .meta{font-size:12px;color:var(--muted)}
+    .load-more{display:block;margin:14px auto;padding:10px 18px;border-radius:6px;border:none;background:#007bff;color:#fff;cursor:pointer}
+    .summary-list{max-height:300px;overflow:auto;padding:8px;margin-top:8px}
+    /* responsive */
+    @media (max-width:900px){
+      th,td{font-size:13px;padding:8px}
+      header{flex-direction:column;gap:10px;align-items:flex-start}
+      .top-buttons{flex-wrap:wrap}
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>রক্তদান ড্যাশবোর্ড</h1>
+      <div class="top-buttons">
+        <button class="stat-btn" id="totalBtn">
+          মোট ডোনার<br><small id="totalCount">—</small>
+        </button>
+        <button class="stat-btn" id="addrBtn">ঠিকানাভিত্তিক <br><small>বিস্তারিত</small></button>
+        <button class="stat-btn" id="areaBtn">এরিয়া বিভাজন <br><small>বিস্তারিত</small></button>
+      </div>
+    </header>
+
+    <div style="height:12px"></div>
+
+    <div class="controls">
+      <input id="globalSearch" class="search-box" placeholder="নাম, ফোন, ঠিকানা, ব্লাড গ্রুপ বা এরিয়া দিয়ে খুঁজুন..." />
+      <select id="areaFilter" class="filter"><option value=""> এরিয়া</option></select>
+      <select id="bloodFilter" class="filter"><option value=""> ব্লাড গ্রুপ</option></select>
+      <button id="refreshBtn" class="img-btn" title="রিফ্রেশ">Refresh</button>
+    </div>
+
+    <div class="card">
+      <div style="overflow:auto">
+        <table id="dataTable" aria-live="polite">
+          <thead>
+            <tr>
+              <th>Timestamp</th>
+              <th>Name</th>
+              <th>Address</th>
+              <th>Phone</th>
+              <th>BloodGroup</th>
+              <th>Area</th>
+              <th>Image</th>
+            </tr>
+          </thead>
+          <tbody id="tableBody">
+            <!-- rows will be injected -->
+          </tbody>
+        </table>
+      </div>
+
+      <button id="loadMore" class="load-more" style="display:none">আরও</button>
+    </div>
+
+    <!-- summary modal areas (simple) -->
+    <div id="summaryModal" class="card" style="margin-top:12px;display:none">
+      <button id="closeSummary" style="float:right;background:#eee;border:none;padding:6px;border-radius:6px;cursor:pointer">Close</button>
+      <h3 id="summaryTitle" style="margin-top:0">Summary</h3>
+      <div class="summary-list" id="summaryList"></div>
+    </div>
+  </div>
+
+<script>
+/*
+  === IMPORTANT ===
+  Replace the sheetURL value below with your OpenSheet URL:
+  e.g. "https://opensheet.elk.sh/YOUR_SPREADSHEET_ID/Sheet1"
+*/
+const sheetURL = "https://opensheet.elk.sh/1SuyUnxhhTb4wrh7vQHJVpy3RaD16TQJaC2RgVJ82GDY/Sheet1"; // <-- paste your opensheet URL here
+
+// internal state
+let allData = [];        // raw rows from opensheet
+let filtered = [];       // after search/filter
+let currentEnd = 0;
+const perPage = 12;      // rows per "page" shown initially
+
+// DOM refs
+const tableBody = document.getElementById('tableBody');
+const loadMoreBtn = document.getElementById('loadMore');
+const totalCountEl = document.getElementById('totalCount');
+const areaFilter = document.getElementById('areaFilter');
+const bloodFilter = document.getElementById('bloodFilter');
+const searchInput = document.getElementById('globalSearch');
+const refreshBtn = document.getElementById('refreshBtn');
+const summaryModal = document.getElementById('summaryModal');
+const summaryTitle = document.getElementById('summaryTitle');
+const summaryList = document.getElementById('summaryList');
+const totalBtn = document.getElementById('totalBtn');
+const addrBtn = document.getElementById('addrBtn');
+const areaBtn = document.getElementById('areaBtn');
+
+// helpers
+function sanitize(s){ return s==null? '' : String(s); }
+function toKey(s){ return sanitize(s).trim().toLowerCase(); }
+
+// fetch data from opensheet
+async function fetchData(){
+  if(!sheetURL || sheetURL.includes('YOUR_OPENSHEET_URL_HERE')){
+    alert('আপনার OpenSheet URLটি sheetURL ভ্যারিয়বে সেট করে দিন।');
+    return;
+  }
+  try {
+    const res = await fetch(sheetURL);
+    const data = await res.json();
+    // expected columns: Timestamp Name Address Phone BloodGroup Area Image
+    allData = data.map(row=>{
+      return {
+        Timestamp: sanitize(row.Timestamp),
+        Name: sanitize(row.Name),
+        Address: sanitize(row.Address),
+        Phone: sanitize(row.Phone),
+        BloodGroup: sanitize(row.BloodGroup),
+        Area: sanitize(row.Area),
+        Image: sanitize(row.Image)
+      };
+    });
+    setupFilters();
+    applyFiltersAndSearch();
+  } catch (err){
+    console.error(err);
+    alert('ডেটা লোড করতে Problem: ' + err.message);
+  }
+}
+
+// setup filter dropdowns from data
+function setupFilters(){
+  const areas = new Set();
+  const bgs = new Set();
+  allData.forEach(r=>{
+    if(r.Area) areas.add(r.Area);
+    if(r.BloodGroup) bgs.add(r.BloodGroup);
+  });
+  // clear except first default option
+  while(areaFilter.options.length>1) areaFilter.remove(1);
+  while(bloodFilter.options.length>1) bloodFilter.remove(1);
+  Array.from(areas).sort((a,b)=>a.localeCompare(b)).forEach(a=>{
+    const opt = document.createElement('option'); opt.value=a; opt.textContent=a;
+    areaFilter.appendChild(opt);
+  });
+  Array.from(bgs).sort((a,b)=>a.localeCompare(b)).forEach(b=>{
+    const opt = document.createElement('option'); opt.value=b; opt.textContent=b;
+    bloodFilter.appendChild(opt);
+  });
+  totalCountEl.textContent = allData.length;
+}
+
+// apply search+filters then render first page
+function applyFiltersAndSearch(){
+  const a = toKey(areaFilter.value);
+  const b = toKey(bloodFilter.value);
+  const q = toKey(searchInput.value);
+
+  filtered = allData.filter(r=>{
+    const matchA = !a || toKey(r.Area) === a;
+    const matchB = !b || toKey(r.BloodGroup) === b;
+    const hay = (r.Name + ' ' + r.Phone + ' ' + r.Address + ' ' + r.BloodGroup + ' ' + r.Area).toLowerCase();
+    const matchQ = !q || hay.includes(q);
+    return matchA && matchB && matchQ;
+  });
+  // reset pagination
+  currentEnd = Math.min(perPage, filtered.length);
+  renderTable();
+}
+
+// render visible rows
+function renderTable(){
+  tableBody.innerHTML = '';
+  const show = filtered.slice(0, currentEnd);
+  if(show.length === 0){
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td colspan="7" style="text-align:center;padding:18px;color:var(--muted)">কোনো ডেটা পাওয়া যায়নি</td>';
+    tableBody.appendChild(tr);
+  } else {
+    show.forEach((r, idx)=>{
+      const tr = document.createElement('tr');
+
+      // Image column: show "Enter" button that toggles image
+      const imgCell = `<td>
+        <button class="img-btn" data-img="${encodeURIComponent(r.Image||'')}" onclick="toggleImage(event)">Enter</button>
+        <div class="hidden-img-container"></div>
+      </td>`;
+
+      tr.innerHTML = `
+        <td>${escapeHtml(r.Timestamp)}</td>
+        <td>${escapeHtml(r.Name)}</td>
+        <td>${escapeHtml(r.Address)}</td>
+        <td><a class="phone-link" href="tel:${escapeHtml(r.Phone)}">${escapeHtml(r.Phone)}</a></td>
+        <td>${escapeHtml(r.BloodGroup)}</td>
+        <td>${escapeHtml(r.Area)}</td>
+        ${imgCell}
+      `;
+      tableBody.appendChild(tr);
+    });
+  }
+  // load more button visibility
+  loadMoreBtn.style.display = (currentEnd < filtered.length) ? 'block' : 'none';
+}
+
+// simple XSS-safe escape
+function escapeHtml(str){
+  if(str === null || str === undefined) return '';
+  return String(str)
+    .replaceAll('&','&amp;')
+    .replaceAll('<','&lt;')
+    .replaceAll('>','&gt;')
+    .replaceAll('"','&quot;')
+    .replaceAll("'",'&#039;');
+}
+
+// load more handler
+function loadMore(){
+  currentEnd = Math.min(filtered.length, currentEnd + perPage);
+  renderTable();
+}
+
+// toggle image display for a row (called from inline onclick)
+window.toggleImage = function(e){
+  const btn = e.currentTarget;
+  const container = btn.parentElement.querySelector('.hidden-img-container');
+  const imgUrl = decodeURIComponent(btn.dataset.img || '');
+  if(!imgUrl) {
+    container.innerHTML = '<div class="meta">কোনো ছবি দেওয়া নেই</div>';
+    return;
+  }
+  // toggle
+  if(container.innerHTML.trim() === ''){
+    // create img element
+    const img = document.createElement('img');
+    img.className = 'hidden-img';
+    img.src = imgUrl;
+    img.alt = 'Image';
+    img.style.display = 'block';
+    img.style.maxWidth = '120px';
+    container.innerHTML = '';
+    container.appendChild(img);
+  } else {
+    container.innerHTML = '';
+  }
+};
+
+// summaries and counts
+function showTotalCount(){
+  summaryTitle.textContent = 'Total donor';
+  summaryList.innerHTML = `<div><strong>${allData.length}</strong> people</div>`;
+  summaryModal.style.display = 'block';
+}
+function showAddressSummary(){
+  const map = {};
+  allData.forEach(r=>{ const k = r.Address || 'Unknown'; map[k] = (map[k]||0)+1; });
+  showSummaryMap('donor address', map);
+}
+function showAreaSummary(){
+  const map = {};
+  allData.forEach(r=>{ const k = r.Area || 'Unknown'; map[k] = (map[k]||0)+1; });
+  showSummaryMap('donor are', map);
+}
+function showSummaryMap(title, map){
+  summaryTitle.textContent = title;
+  const items = Object.entries(map).sort((a,b)=>b[1]-a[1]);
+  summaryList.innerHTML = items.map(([k,v]) => `<div style="padding:6px 4px;border-bottom:1px dashed #eee"><strong>${escapeHtml(k)}</strong> — ${v}</div>`).join('');
+  summaryModal.style.display = 'block';
+}
+
+// close summary
+document.getElementById('closeSummary').addEventListener('click', ()=> summaryModal.style.display='none');
+
+// event listeners
+searchInput.addEventListener('input', ()=> applyFiltersAndSearch());
+areaFilter.addEventListener('change', ()=> applyFiltersAndSearch());
+bloodFilter.addEventListener('change', ()=> applyFiltersAndSearch());
+loadMoreBtn.addEventListener('click', loadMore);
+refreshBtn.addEventListener('click', fetchData);
+totalBtn.addEventListener('click', showTotalCount);
+addrBtn.addEventListener('click', showAddressSummary);
+areaBtn.addEventListener('click', showAreaSummary);
+
+// initial fetch
+fetchData();
+</script>
+</body>
+</html>
